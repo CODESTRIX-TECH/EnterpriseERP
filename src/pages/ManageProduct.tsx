@@ -557,6 +557,7 @@ export default function ManageProduct() {
       mrp: 0,
       isActive: true,
       unitId: '',
+      isGstInclusive: false,
     });
     setAutoSku(true);
     setEditingId(null);
@@ -590,6 +591,7 @@ export default function ManageProduct() {
       mrp: p.mrp || 0,
       isActive: p.isActive,
       unitId: p.unitId || '',
+      isGstInclusive: p.isGstInclusive ?? false,
     });
     setAutoSku(false);
     setEditingId(p.id || null);
@@ -602,6 +604,7 @@ export default function ManageProduct() {
     try {
       const payload = {
         ...data,
+        isGstInclusive: !!watch('isGstInclusive'),
         companyId: user?.companyId,
         branchId: user?.branchId,
         // Enforce numeric conversions
@@ -1153,25 +1156,45 @@ export default function ManageProduct() {
                   {errors.mrp && <span className="text-xs text-red-500">{errors.mrp.message}</span>}
                 </div>
 
-                <div className="space-y-2">
-                  <label htmlFor="taxProfileId" className="text-sm font-medium text-foreground">
-                    GST Profile (Tax Profile)
-                  </label>
-                  <Select
-                    value={watch('taxProfileId') || ''}
-                    onValueChange={(val) => setValue('taxProfileId', val)}
-                  >
-                    <SelectTrigger id="taxProfileId">
-                      <SelectValue placeholder="Select Tax Slab" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {taxProfiles.map((tp) => (
-                        <SelectItem key={tp.id} value={tp.id || ''}>
-                          {tp.name} ({tp.cgst + tp.sgst}%)
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label htmlFor="taxProfileId" className="text-sm font-medium text-foreground">
+                      GST Profile (Tax Profile)
+                    </label>
+                    <Select
+                      value={watch('taxProfileId') || ''}
+                      onValueChange={(val) => setValue('taxProfileId', val)}
+                    >
+                      <SelectTrigger id="taxProfileId">
+                        <SelectValue placeholder="Select Tax Slab" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {taxProfiles.map((tp) => (
+                          <SelectItem key={tp.id} value={tp.id || ''}>
+                            {tp.name} ({tp.cgst + tp.sgst}%)
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label htmlFor="isGstInclusive" className="text-sm font-medium text-foreground">
+                      GST Type
+                    </label>
+                    <Select
+                      value={watch('isGstInclusive') ? 'inclusive' : 'exclusive'}
+                      onValueChange={(val) => setValue('isGstInclusive', val === 'inclusive')}
+                    >
+                      <SelectTrigger id="isGstInclusive">
+                        <SelectValue placeholder="Select GST Type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="exclusive">GST Exclusive</SelectItem>
+                        <SelectItem value="inclusive">GST Inclusive</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
 
                 <div className="space-y-2">

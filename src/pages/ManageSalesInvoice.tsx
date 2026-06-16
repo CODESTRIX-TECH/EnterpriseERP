@@ -929,29 +929,36 @@ export default function ManageSalesInvoice() {
                           <TableHead>Batch Number</TableHead>
                           <TableHead className="text-center">Qty</TableHead>
                           <TableHead className="text-right">Price (₹)</TableHead>
+                          <TableHead className="text-right">Taxable Amount (₹)</TableHead>
                           <TableHead className="text-center">GST %</TableHead>
-                          <TableHead className="text-center">Disc %</TableHead>
+                          <TableHead className="text-right">GST (₹)</TableHead>
                           <TableHead className="text-right">Amount (₹)</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {viewingInvoice.items.map((item, idx) => (
-                          <TableRow key={idx} className="border-border">
-                            <TableCell className="font-medium text-zinc-900 dark:text-white">{item.productName}</TableCell>
-                            <TableCell>{item.variantName || '—'}</TableCell>
-                            <TableCell>
-                              <span className="font-mono text-xs">{item.batchNumber || '—'}</span>
-                              {item.expiryDate && (
-                                <span className="text-[10px] text-zinc-400 block mt-0.5">Exp: {new Date(item.expiryDate).toLocaleDateString()}</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-center">{item.qty}</TableCell>
-                            <TableCell className="text-right">₹{item.rate.toFixed(2)}</TableCell>
-                            <TableCell className="text-center">{item.taxPercentage}%</TableCell>
-                            <TableCell className="text-center">{item.discountPercentage}%</TableCell>
-                            <TableCell className="text-right font-semibold">₹{(item.amount || 0).toFixed(2)}</TableCell>
-                          </TableRow>
-                        ))}
+                        {viewingInvoice.items.map((item, idx) => {
+                          const taxableAmt = item.taxableAmount !== undefined && item.taxableAmount !== null
+                            ? item.taxableAmount
+                            : (item.amount || 0) - (item.taxAmount || 0);
+                          return (
+                            <TableRow key={idx} className="border-border">
+                              <TableCell className="font-medium text-zinc-900 dark:text-white">{item.productName}</TableCell>
+                              <TableCell>{item.variantName || '—'}</TableCell>
+                              <TableCell>
+                                <span className="font-mono text-xs">{item.batchNumber || '—'}</span>
+                                {item.expiryDate && (
+                                  <span className="text-[10px] text-zinc-400 block mt-0.5">Exp: {new Date(item.expiryDate).toLocaleDateString()}</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-center">{item.qty}</TableCell>
+                              <TableCell className="text-right">₹{item.rate.toFixed(2)}</TableCell>
+                              <TableCell className="text-right">₹{taxableAmt.toFixed(2)}</TableCell>
+                              <TableCell className="text-center">{item.taxPercentage}%</TableCell>
+                              <TableCell className="text-right">₹{(item.taxAmount || 0).toFixed(2)}</TableCell>
+                              <TableCell className="text-right font-semibold">₹{(item.amount || 0).toFixed(2)}</TableCell>
+                            </TableRow>
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   </div>
