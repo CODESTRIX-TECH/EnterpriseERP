@@ -42,6 +42,7 @@ import type { ProductBatchDto } from "@/types/ProductBatchDto"
 import type { GstDto } from "@/types/GstDto"
 import type { SalesInvoiceDto } from "@/types/SalesInvoiceDto"
 import type { SalesInvoiceItemDto } from "@/types/SalesInvoiceItemDto"
+import type { HSNCodeDto } from "@/types/HSNCodeDto"
 
 interface PaymentDetailItem {
   id: string
@@ -69,6 +70,7 @@ export default function CreateSalesInvoice() {
   const [taxProfiles, setTaxProfiles] = useState<GstDto[]>([])
   const [inventoryStatus, setInventoryStatus] = useState<any[]>([])
   const [units, setUnits] = useState<any[]>([])
+  const [hsnCodes, setHsnCodes] = useState<HSNCodeDto[]>([])
 
   // Store loaded batches per product dynamically to keep nearest-expiry batch options
   const [productBatches, setProductBatches] = useState<{ [productId: string]: ProductBatchDto[] }>({})
@@ -414,7 +416,7 @@ export default function CreateSalesInvoice() {
     const fetchDeps = async () => {
       setIsLoadingDeps(true)
       try {
-        const [resCust, resWh, resProd, resVar, resTax, resStock, resUnit] = await Promise.all([
+        const [resCust, resWh, resProd, resVar, resTax, resStock, resUnit, resHsn] = await Promise.all([
           axiosClient.get("/Customer", { params: { pageNumber: 1, pageSize: 30 } }),
           axiosClient.get("/Warehouse", { params: { pageNumber: 1, pageSize: 10000 } }),
           axiosClient.get("/Product", { params: { pageNumber: 1, pageSize: 30 } }),
@@ -422,6 +424,7 @@ export default function CreateSalesInvoice() {
           axiosClient.get("/TaxProfile", { params: { pageNumber: 1, pageSize: 10000 } }),
           axiosClient.get("/Inventory/Status"),
           axiosClient.get("/Unit", { params: { pageNumber: 1, pageSize: 10000 } }),
+          axiosClient.get("/HSNCode", { params: { pageNumber: 1, pageSize: 10000 } }),
         ]) as any[]
 
         if (resCust?.success) {
@@ -462,6 +465,7 @@ export default function CreateSalesInvoice() {
         if (resTax?.success) setTaxProfiles(resTax.data?.items || resTax.data || [])
         if (resStock?.success) setInventoryStatus(resStock.data || [])
         if (resUnit?.success) setUnits(resUnit.data?.items || resUnit.data || [])
+        if (resHsn?.success) setHsnCodes(resHsn.data?.items || resHsn.data || [])
 
         // If creating new invoice, fetch the next sequential invoice number
         if (!isEditMode && user?.companyId) {
@@ -563,6 +567,8 @@ export default function CreateSalesInvoice() {
                 discountPercentage: item.discountPercentage || 0,
                 discountAmount: item.discountAmount || 0,
                 amount: item.amount || 0,
+                isGstInclusive: !!item.isGstInclusive,
+                taxableAmount: item.taxableAmount || 0,
               }))
             )
 
@@ -704,6 +710,8 @@ export default function CreateSalesInvoice() {
       unitId: product.unitId || "",
       unitName: product.unitName || "",
       conversionFactor: 1.0,
+      isGstInclusive: !!product.isGstInclusive,
+      taxableAmount: 0,
     }
 
     calculateLineTotals(updated, index)
@@ -837,31 +845,64 @@ export default function CreateSalesInvoice() {
       [field]: value,
     } as any
 
-    calculateLineTotals(updated, index)
+    calculateLineTotals(updated, index, field === "discountAmount")
   }
 
   // perform line totals calculations
   const calculateLineTotals = (
     list: SalesInvoiceItemDto[],
-    index: number
+    index: number,
+    preferDiscVal?: boolean
   ) => {
     const item = list[index]
     const qty = Number(item.qty) || 0
     const rate = Number(item.rate) || 0
-    const discPct = Number(item.discountPercentage) || 0
+    let discPct = Number(item.discountPercentage) || 0
+    let discAmt = Number(item.discountAmount) || 0
     const taxPct = Number(item.taxPercentage) || 0
+    const isInclusive = !!item.isGstInclusive
 
-    const grossAmount = qty * rate
-    const discountAmount = grossAmount * (discPct / 100)
-    const taxableAmount = grossAmount - discountAmount
-    const taxAmount = taxableAmount * (taxPct / 100)
-    const totalAmount = taxableAmount + taxAmount
+    let grossAmount = qty * rate
+    let discountAmount = 0
 
-    list[index] = {
-      ...item,
-      discountAmount: Number(discountAmount.toFixed(2)),
-      taxAmount: Number(taxAmount.toFixed(2)),
-      amount: Number(totalAmount.toFixed(2)),
+    if (isInclusive) {
+      if (preferDiscVal) {
+        discountAmount = discAmt
+        discPct = grossAmount > 0 ? Number(((discAmt / grossAmount) * 100).toFixed(4)) : 0
+      } else {
+        discountAmount = Number((grossAmount * (discPct / 100)).toFixed(2))
+      }
+      const totalAmount = Number((grossAmount - discountAmount).toFixed(2))
+      const taxableAmount = Number((totalAmount / (1 + taxPct / 100)).toFixed(2))
+      const taxAmount = Number((totalAmount - taxableAmount).toFixed(2))
+
+      list[index] = {
+        ...item,
+        discountPercentage: Number(discPct.toFixed(2)),
+        discountAmount: Number(discountAmount.toFixed(2)),
+        taxableAmount: Number(taxableAmount.toFixed(2)),
+        taxAmount: Number(taxAmount.toFixed(2)),
+        amount: Number(totalAmount.toFixed(2)),
+      }
+    } else {
+      if (preferDiscVal) {
+        discountAmount = discAmt
+        discPct = grossAmount > 0 ? Number(((discAmt / grossAmount) * 100).toFixed(4)) : 0
+      } else {
+        discountAmount = Number((grossAmount * (discPct / 100)).toFixed(2))
+      }
+      const taxableAmount = Number((grossAmount - discountAmount).toFixed(2))
+      const taxAmount = Number((taxableAmount * (taxPct / 100)).toFixed(2))
+      const totalAmount = Number((taxableAmount + taxAmount).toFixed(2))
+
+      list[index] = {
+        ...item,
+        discountPercentage: Number(discPct.toFixed(2)),
+        discountAmount: Number(discountAmount.toFixed(2)),
+        taxableAmount: Number(taxableAmount.toFixed(2)),
+        taxAmount: Number(taxAmount.toFixed(2)),
+        amount: Number(totalAmount.toFixed(2)),
+      }
     }
 
     setItems(list)
@@ -971,6 +1012,8 @@ export default function CreateSalesInvoice() {
       unitId: product.unitId || "",
       unitName: product.unitName || "",
       conversionFactor: 1.0,
+      isGstInclusive: !!product.isGstInclusive,
+      taxableAmount: 0,
     }
 
     const updatedItems = [...items, newItem]
@@ -1001,7 +1044,14 @@ export default function CreateSalesInvoice() {
     items.forEach((item) => {
       const qty = Number(item.qty) || 0
       const rate = Number(item.rate) || 0
-      subTotal += qty * rate
+      const taxPct = Number(item.taxPercentage) || 0
+      const isInclusive = !!item.isGstInclusive
+
+      const itemGrossBase = isInclusive
+        ? Number(((qty * rate) / (1 + taxPct / 100)).toFixed(2))
+        : Number((qty * rate).toFixed(2))
+
+      subTotal += itemGrossBase
       totalDiscount += Number(item.discountAmount) || 0
       totalTax += Number(item.taxAmount) || 0
     })
@@ -1189,6 +1239,8 @@ export default function CreateSalesInvoice() {
           amount: Number(i.amount) || 0,
           unitId: i.unitId || undefined,
           conversionFactor: i.conversionFactor || 1.0,
+          isGstInclusive: !!i.isGstInclusive,
+          taxableAmount: Number(i.taxableAmount) || 0,
         })),
       }
 
@@ -1539,21 +1591,20 @@ export default function CreateSalesInvoice() {
           </div>
 
           <div className="w-full overflow-x-auto">
-            <Table className="min-w-[1100px]">
+            <Table className="min-w-[1050px] w-full table-fixed">
               <TableHeader className="bg-muted/10">
                 <TableRow>
-                  <TableHead className="w-[40px] px-1 text-center">Sr.</TableHead>
-                  <TableHead className="w-[250px] px-1.5">Product Selection</TableHead>
-                  <TableHead className="w-[120px] px-1.5">Variant</TableHead>
-                  <TableHead className="w-[150px] px-1.5">Batch No.</TableHead>
-                  <TableHead className="w-[110px] px-1.5 text-center">Expiry Date</TableHead>
-                  <TableHead className="w-[110px] px-1.5">Unit</TableHead>
-                  <TableHead className="w-[90px] px-1.5 text-right">Qty</TableHead>
-                  <TableHead className="w-[100px] px-1.5 text-right">Price (₹)</TableHead>
-                  <TableHead className="w-[80px] px-1.5 text-right">Disc %</TableHead>
-                  <TableHead className="w-[80px] px-1.5 text-right">Tax %</TableHead>
-                  <TableHead className="w-[110px] px-1.5 text-right">Total Amount</TableHead>
-                  <TableHead className="w-[40px] px-1 text-center"></TableHead>
+                  <TableHead className="w-[30px] px-1 text-center">#</TableHead>
+                  <TableHead className="w-[230px] px-1.5">Medicine / Variant</TableHead>
+                  <TableHead className="w-[130px] px-1.5">Batch / Expiry</TableHead>
+                  <TableHead className="w-[80px] px-1.5">Unit</TableHead>
+                  <TableHead className="w-[75px] px-1.5 text-right font-semibold">Qty</TableHead>
+                  <TableHead className="w-[85px] px-1.5 text-right font-semibold">Price</TableHead>
+                  <TableHead className="w-[75px] px-1.5 text-right font-semibold">Disc %</TableHead>
+                  <TableHead className="w-[85px] px-1.5 text-right font-semibold">Disc ₹</TableHead>
+                  <TableHead className="w-[85px] px-1.5 text-right font-semibold">GST (%)</TableHead>
+                  <TableHead className="w-[115px] px-1.5 text-right font-semibold">Line Total</TableHead>
+                  <TableHead className="w-[40px] px-1 text-center">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1578,180 +1629,175 @@ export default function CreateSalesInvoice() {
                           {index + 1}
                         </TableCell>
 
-                        {/* Product Selection */}
+                        {/* Product Selection & Variant */}
                         <TableCell className="px-1.5 py-2">
-                          <button
-                            type="button"
-                            onClick={() => setSelectingProductForIndex(index)}
-                            className="flex h-8 w-full cursor-pointer items-center justify-between rounded-md border border-zinc-200 bg-white px-2 py-1 text-left text-xs text-zinc-900 transition-colors duration-150 hover:bg-zinc-50 focus:ring-1 focus:ring-zinc-900 focus:outline-hidden dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50"
-                          >
-                            {selectedProduct ? (
-                              <div className="truncate pr-1">
-                                <div className="truncate font-medium">
-                                  {selectedProduct.name}
+                          <div className="space-y-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setSelectingProductForIndex(index)}
+                              className="flex h-8 w-full cursor-pointer items-center justify-between rounded-md border border-zinc-200 bg-white px-2 py-1 text-left text-xs text-zinc-900 transition-colors duration-150 hover:bg-zinc-55/40 hover:bg-zinc-50 focus:ring-1 focus:ring-zinc-900 focus:outline-hidden dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50"
+                            >
+                              {selectedProduct ? (
+                                <div className="truncate pr-1">
+                                  <div className="truncate font-medium">
+                                    {selectedProduct.name}
+                                  </div>
+                                  <div className="mt-0.5 truncate font-mono text-[9px] leading-none text-zinc-400">
+                                    {selectedProduct.productCode}
+                                    {selectedProduct.hsnCodeId ? ` • HSN: ${hsnCodes.find((h) => h.id === selectedProduct.hsnCodeId)?.code || ""}` : ""}
+                                  </div>
                                 </div>
-                                <div className="mt-0.5 truncate font-mono text-[9px] leading-none text-zinc-400">
-                                  {selectedProduct.productCode}{" "}
-                                  {selectedProduct.unitName ? `• Unit: ${selectedProduct.unitName}` : ""}
+                              ) : item.productId ? (
+                                <div className="truncate pr-1">
+                                  <div className="truncate font-medium">
+                                    {item.productName || "Product Loaded"}
+                                  </div>
+                                  <div className="mt-0.5 truncate font-mono text-[9px] leading-none text-zinc-400">
+                                    {item.productCode || ""}
+                                  </div>
                                 </div>
-                              </div>
-                            ) : item.productId ? (
-                              <div className="truncate pr-1">
-                                <div className="truncate font-medium">
-                                  {item.productName || "Product Loaded"}
-                                </div>
-                                <div className="mt-0.5 truncate font-mono text-[9px] leading-none text-zinc-400">
-                                  {item.productCode || ""}
-                                </div>
-                              </div>
-                            ) : (
-                              <span className="text-zinc-400 dark:text-zinc-500">
-                                Select Product...
-                              </span>
-                            )}
-                            <Search className="ml-1.5 h-3 w-3 shrink-0 text-zinc-400" />
-                          </button>
-                        </TableCell>
+                              ) : (
+                                <span className="text-zinc-400 dark:text-zinc-500">
+                                  Select Medicine...
+                                </span>
+                              )}
+                              <Search className="ml-1.5 h-3 w-3 shrink-0 text-zinc-400" />
+                            </button>
 
-                        {/* Variant Dropdown */}
-                        <TableCell className="px-1.5 py-2">
-                          <select
-                            value={item.productVariantId || ""}
-                            onChange={(e) => handleVariantChange(index, e.target.value)}
-                            disabled={!item.productId || itemVariants.length === 0}
-                            className="h-8 w-full cursor-pointer rounded-md border border-zinc-200 bg-white px-1.5 text-xs text-zinc-900 focus:outline-hidden disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50"
-                          >
-                            <option value="">No Variant</option>
-                            {itemVariants.map((v) => (
-                              <option key={v.id} value={v.id}>
-                                {v.variantCombination}
-                              </option>
-                            ))}
-                          </select>
-                        </TableCell>
-
-                        {/* Batch Dropdown */}
-                        <TableCell className="px-1.5 py-2">
-                          <div className="relative w-full flex items-center">
-                            <input
-                              type="text"
-                              list={`batch-list-${index}`}
-                              placeholder={itemBatches.length === 0 ? "No Batch Available" : "Type / Search Batch..."}
-                              value={item.batchNumber || ""}
-                              onChange={(e) => {
-                                const batchNo = e.target.value
-                                const matchedBatch = itemBatches.find(
-                                  (b) => b.batchNo?.toLowerCase() === batchNo.toLowerCase()
-                                )
-                                if (matchedBatch) {
-                                  handleBatchChange(index, matchedBatch.id || "")
-                                } else {
-                                  const updated = [...items]
-                                  updated[index].batchNumber = batchNo
-                                  updated[index].productBatchId = ""
-                                  updated[index].expiryDate = ""
-                                  // Fallback price when clearing / typing unmatched batch
-                                  const product = products.find((p) => p.id === item.productId)
-                                  if (product && product.mrp && product.mrp > 0) {
-                                    updated[index].rate = product.mrp
-                                  } else if (product) {
-                                    updated[index].rate = product.salesRate || 0
-                                  }
-                                  calculateLineTotals(updated, index)
-                                }
-                              }}
-                              onFocus={(e) => {
-                                e.target.select()
-                              }}
-                              onBlur={() => {
-                                setTimeout(() => {
-                                  setItems((currentItems) => {
-                                    const updated = [...currentItems]
-                                    const currentItem = updated[index]
-                                    if (!currentItem || !currentItem.productId) return currentItems
-                                    if (!currentItem.batchNumber) {
-                                      return currentItems
-                                    }
-                                    if (!currentItem.productBatchId) {
-                                      const batches = productBatches[currentItem.productId] || []
-                                      const defaultBatch = batches.length > 0 ? batches[0] : null
-                                      if (defaultBatch) {
-                                        currentItem.productBatchId = defaultBatch.id || ""
-                                        currentItem.batchNumber = defaultBatch.batchNo || ""
-                                        currentItem.expiryDate = defaultBatch.expiryDate ? defaultBatch.expiryDate.split("T")[0] : ""
-                                        
-                                        // Update price:
-                                        if (defaultBatch.mrp && defaultBatch.mrp > 0) {
-                                          currentItem.rate = defaultBatch.mrp
-                                        } else {
-                                          const product = products.find((p) => p.id === currentItem.productId)
-                                          if (product && product.mrp && product.mrp > 0) {
-                                            currentItem.rate = product.mrp
-                                          } else if (product) {
-                                            currentItem.rate = product.salesRate || 0
-                                          }
-                                        }
-                                      }
-                                    } else {
-                                      const batches = productBatches[currentItem.productId] || []
-                                      const originalBatch = batches.find(b => b.id === currentItem.productBatchId)
-                                      if (originalBatch) {
-                                        currentItem.batchNumber = originalBatch.batchNo || ""
-                                      }
-                                    }
-                                    calculateLineTotals(updated, index)
-                                    return updated
-                                  })
-                                }, 150)
-                              }}
-                              disabled={!item.productId || itemBatches.length === 0}
-                              className="h-8 w-full rounded-md border border-zinc-200 bg-white pl-2 pr-7 font-mono text-xs text-zinc-900 focus:outline-hidden disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 appearance-none"
-                            />
-                            {item.batchNumber && (
-                              <button
-                                type="button"
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => {
-                                  const updated = [...items]
-                                  updated[index].batchNumber = ""
-                                  updated[index].productBatchId = ""
-                                  updated[index].expiryDate = ""
-                                  const product = products.find((p) => p.id === item.productId)
-                                  if (product && product.mrp && product.mrp > 0) {
-                                    updated[index].rate = product.mrp
-                                  } else if (product) {
-                                    updated[index].rate = product.salesRate || 0
-                                  }
-                                  calculateLineTotals(updated, index)
-                                  setItems(updated)
-                                }}
-                                className="absolute right-1.5 flex h-5 w-5 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-100 hover:text-zinc-650 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+                            {/* Variant Dropdown if variants exist */}
+                            {item.productId && itemVariants.length > 0 && (
+                              <select
+                                value={item.productVariantId || ""}
+                                onChange={(e) => handleVariantChange(index, e.target.value)}
+                                className="h-7 w-full cursor-pointer rounded-md border border-zinc-200 bg-white px-1.5 text-[11px] text-zinc-900 focus:outline-hidden dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50"
                               >
-                                <X className="h-3 w-3" />
-                              </button>
+                                <option value="">No Variant</option>
+                                {itemVariants.map((v) => (
+                                  <option key={v.id} value={v.id}>
+                                    {v.variantCombination}
+                                  </option>
+                                ))}
+                              </select>
                             )}
                           </div>
-                          <datalist id={`batch-list-${index}`}>
-                            {itemBatches.map((b) => {
-                              const expStr = b.expiryDate
-                                ? new Date(b.expiryDate).toLocaleDateString()
-                                : "No Expiry"
-                              const avlQty = getBatchStock(item.productId, b.id || null)
-                              return (
-                                <option
-                                  key={b.id}
-                                  value={b.batchNo}
-                                >
-                                  {`Avl: ${avlQty} • MRP: ₹${b.mrp || 0} • Exp: ${expStr}`}
-                                </option>
-                              )
-                            })}
-                          </datalist>
                         </TableCell>
 
-                        {/* Expiry Date (Read-Only) */}
-                        <TableCell className="px-1.5 py-2 text-center font-mono text-xs text-zinc-500">
-                          {item.expiryDate ? new Date(item.expiryDate).toLocaleDateString() : "-"}
+                        {/* Batch No & Expiry Date */}
+                        <TableCell className="px-1.5 py-2">
+                          <div className="flex flex-col rounded-md border border-zinc-200 bg-white p-1 dark:border-zinc-800 dark:bg-zinc-900 focus-within:border-zinc-400 dark:focus-within:border-zinc-500 focus-within:ring-1 focus-within:ring-zinc-300 dark:focus-within:ring-zinc-700">
+                            <div className="relative w-full flex items-center">
+                              <input
+                                type="text"
+                                list={`batch-list-${index}`}
+                                placeholder={itemBatches.length === 0 ? "No Batch" : "Search Batch..."}
+                                value={item.batchNumber || ""}
+                                onChange={(e) => {
+                                  const batchNo = e.target.value
+                                  const matchedBatch = itemBatches.find(
+                                    (b) => b.batchNo?.toLowerCase() === batchNo.toLowerCase()
+                                  )
+                                  if (matchedBatch) {
+                                    handleBatchChange(index, matchedBatch.id || "")
+                                  } else {
+                                    const updated = [...items]
+                                    updated[index].batchNumber = batchNo
+                                    updated[index].productBatchId = ""
+                                    updated[index].expiryDate = ""
+                                    const product = products.find((p) => p.id === item.productId)
+                                    if (product && product.mrp && product.mrp > 0) {
+                                      updated[index].rate = product.mrp
+                                    } else if (product) {
+                                      updated[index].rate = product.salesRate || 0
+                                    }
+                                    calculateLineTotals(updated, index)
+                                  }
+                                }}
+                                onFocus={(e) => e.target.select()}
+                                onBlur={() => {
+                                  setTimeout(() => {
+                                    setItems((currentItems) => {
+                                      const updated = [...currentItems]
+                                      const currentItem = updated[index]
+                                      if (!currentItem || !currentItem.productId) return currentItems
+                                      if (!currentItem.batchNumber) return currentItems
+                                      if (!currentItem.productBatchId) {
+                                        const batches = productBatches[currentItem.productId] || []
+                                        const defaultBatch = batches.length > 0 ? batches[0] : null
+                                        if (defaultBatch) {
+                                          currentItem.productBatchId = defaultBatch.id || ""
+                                          currentItem.batchNumber = defaultBatch.batchNo || ""
+                                          currentItem.expiryDate = defaultBatch.expiryDate ? defaultBatch.expiryDate.split("T")[0] : ""
+                                          if (defaultBatch.mrp && defaultBatch.mrp > 0) {
+                                            currentItem.rate = defaultBatch.mrp
+                                          } else {
+                                            const product = products.find((p) => p.id === currentItem.productId)
+                                            if (product && product.mrp && product.mrp > 0) {
+                                              currentItem.rate = product.mrp
+                                            } else if (product) {
+                                              currentItem.rate = product.salesRate || 0
+                                            }
+                                          }
+                                        }
+                                      } else {
+                                        const batches = productBatches[currentItem.productId] || []
+                                        const originalBatch = batches.find(b => b.id === currentItem.productBatchId)
+                                        if (originalBatch) {
+                                          currentItem.batchNumber = originalBatch.batchNo || ""
+                                        }
+                                      }
+                                      calculateLineTotals(updated, index)
+                                      return updated
+                                    })
+                                  }, 150)
+                                }}
+                                disabled={!item.productId || itemBatches.length === 0}
+                                className="h-7 w-full border-0 bg-transparent pl-1 pr-7 font-mono text-xs text-zinc-900 focus:outline-hidden disabled:opacity-50 dark:text-zinc-50 appearance-none focus:ring-0 focus-visible:ring-0 shadow-none"
+                              />
+                              {item.batchNumber && (
+                                <button
+                                  type="button"
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => {
+                                    const updated = [...items]
+                                    updated[index].batchNumber = ""
+                                    updated[index].productBatchId = ""
+                                    updated[index].expiryDate = ""
+                                    const product = products.find((p) => p.id === item.productId)
+                                    if (product && product.mrp && product.mrp > 0) {
+                                      updated[index].rate = product.mrp
+                                    } else if (product) {
+                                      updated[index].rate = product.salesRate || 0
+                                    }
+                                    calculateLineTotals(updated, index)
+                                    setItems(updated)
+                                  }}
+                                  className="absolute right-1 flex h-5 w-5 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-100 hover:text-zinc-650 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              )}
+                            </div>
+                            <datalist id={`batch-list-${index}`}>
+                              {itemBatches.map((b) => {
+                                const expStr = b.expiryDate
+                                  ? new Date(b.expiryDate).toLocaleDateString()
+                                  : "No Expiry"
+                                const avlQty = getBatchStock(item.productId, b.id || null)
+                                return (
+                                  <option key={b.id} value={b.batchNo}>
+                                    {`Avl: ${avlQty} • MRP: ₹${b.mrp || 0} • Exp: ${expStr}`}
+                                  </option>
+                                )
+                              })}
+                            </datalist>
+
+                            {/* Expiry Date small text inside the box */}
+                            {item.expiryDate && (
+                              <div className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400 pl-1 mt-0.5 border-t border-zinc-100 dark:border-zinc-800/60 pt-0.5">
+                                Exp: {new Date(item.expiryDate).toLocaleDateString()}
+                              </div>
+                            )}
+                          </div>
                         </TableCell>
 
                         {/* Unit Selector */}
@@ -1760,16 +1806,16 @@ export default function CreateSalesInvoice() {
                             value={item.unitId || selectedProduct?.unitId || ""}
                             onChange={(e) => handleUnitChange(index, e.target.value)}
                             disabled={!item.productId}
-                            className="h-8 w-full cursor-pointer rounded-md border border-zinc-200 bg-white px-1 px-1.5 text-xs text-zinc-900 focus:outline-hidden disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50"
+                            className="h-8 w-full cursor-pointer rounded-md border border-zinc-200 bg-white px-1 text-xs text-zinc-900 focus:outline-hidden disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50"
                           >
                             {selectedProduct && (
                               <option value={selectedProduct.unitId}>
-                                {selectedProduct.unitName} (Base)
+                                {units.find((u) => u.id === selectedProduct.unitId)?.symbol || selectedProduct.unitName}
                               </option>
                             )}
                             {selectedProduct?.alternativeUnits?.map((alt) => (
                               <option key={alt.alternativeUnitId} value={alt.alternativeUnitId}>
-                                {alt.alternativeUnitName} (x{alt.conversionFactor})
+                                {alt.alternativeUnitSymbol || alt.alternativeUnitName}
                               </option>
                             ))}
                           </select>
@@ -1800,7 +1846,7 @@ export default function CreateSalesInvoice() {
                           })()}
                         </TableCell>
 
-                        {/* Price (₹) */}
+                        {/* Price */}
                         <TableCell className="px-1.5 py-2">
                           <Input
                             type="number"
@@ -1827,34 +1873,70 @@ export default function CreateSalesInvoice() {
                               handleNumericFieldChange(index, "discountPercentage", Number(e.target.value))
                             }
                             disabled={!item.productId}
-                            className="h-8 w-full px-1.5 py-1 text-right font-mono text-xs"
+                            className="h-8 w-full px-1 py-1 text-right font-mono text-xs"
                           />
                         </TableCell>
 
-                        {/* Tax % */}
+                        {/* Discount (₹) */}
                         <TableCell className="px-1.5 py-2">
                           <Input
                             type="number"
                             min="0"
-                            max="100"
-                            step="0.1"
-                            value={item.taxPercentage}
+                            step="0.01"
+                            value={item.discountAmount}
                             onChange={(e) =>
-                              handleNumericFieldChange(index, "taxPercentage", Number(e.target.value))
+                              handleNumericFieldChange(index, "discountAmount", Number(e.target.value))
                             }
                             disabled={!item.productId}
-                            className="h-8 w-full px-1.5 py-1 text-right font-mono text-xs"
+                            className="h-8 w-full px-1 py-1 text-right font-mono text-xs"
                           />
                         </TableCell>
 
-                        {/* Net Amount */}
-                        <TableCell className="px-1.5 py-2 text-right font-mono text-xs font-semibold">
-                          ₹{item.amount?.toFixed(2) || "0.00"}
+                        {/* GST % and computed amount */}
+                        <TableCell className="px-1.5 py-2">
+                          <div className="flex flex-col rounded-md border border-zinc-200 bg-white p-1 dark:border-zinc-800 dark:bg-zinc-900 focus-within:border-zinc-400 dark:focus-within:border-zinc-500 focus-within:ring-1 focus-within:ring-zinc-300 dark:focus-within:ring-zinc-700">
+                            <select
+                              value={item.taxPercentage}
+                              onChange={(e) =>
+                                handleNumericFieldChange(index, "taxPercentage", Number(e.target.value))
+                              }
+                              disabled={!item.productId}
+                              className="h-7 w-full border-0 bg-transparent px-1 text-right font-mono text-xs focus:outline-hidden focus:ring-0 focus-visible:ring-0 shadow-none disabled:opacity-50 appearance-none cursor-pointer"
+                            >
+                              <option value="0" className="dark:bg-zinc-900">0%</option>
+                              {taxProfiles.map((tp) => (
+                                <option key={tp.id} value={tp.igst} className="dark:bg-zinc-900">
+                                  {tp.name}
+                                </option>
+                              ))}
+                              {item.taxPercentage !== undefined && item.taxPercentage > 0 && !taxProfiles.some(tp => tp.igst === item.taxPercentage) && (
+                                <option value={item.taxPercentage} className="dark:bg-zinc-900">
+                                  {item.taxPercentage}%
+                                </option>
+                              )}
+                            </select>
+                            <div className="text-xs font-mono text-zinc-700 dark:text-zinc-300 font-semibold pr-1 text-right border-t border-zinc-100 dark:border-zinc-800/60 pt-0.5 mt-0.5">
+                              ₹{item.taxAmount?.toFixed(2) || "0.00"}
+                            </div>
+                          </div>
+                        </TableCell>
+
+                        {/* Line Total & Taxable Amount */}
+                        <TableCell className="px-1.5 py-2 text-right">
+                          <div className="flex flex-col rounded-md border border-zinc-200 bg-zinc-550/5 p-1 dark:border-zinc-800 dark:bg-zinc-900/30">
+                            <div className="font-mono text-xs font-bold text-zinc-900 dark:text-zinc-100 pr-1 py-0.5">
+                              ₹{item.amount?.toFixed(2) || "0.00"}
+                            </div>
+                            <div className="text-xs font-mono text-zinc-700 dark:text-zinc-300 pr-1 pb-0.5 border-t border-zinc-200 dark:border-zinc-800 pt-1 mt-0.5">
+                              Taxable: ₹{item.taxableAmount?.toFixed(2) || "0.00"}
+                            </div>
+                          </div>
                         </TableCell>
 
                         {/* Action: Remove */}
                         <TableCell className="px-1 py-2 text-center">
                           <Button
+                            type="button"
                             variant="ghost"
                             size="icon"
                             onClick={() => removeLineItem(index)}

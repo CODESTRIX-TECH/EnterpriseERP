@@ -75,6 +75,7 @@ export default function QuickAddProductDialog({
   const [salesRate, setSalesRate] = useState<number>(0)
   const [mrp, setMrp] = useState<number>(0)
   const [isActive] = useState(true)
+  const [isGstInclusive, setIsGstInclusive] = useState(false)
 
   // Unit Conversion State
   const [alternativeUnits, setAlternativeUnits] = useState<ProductUnitConversionDto[]>([])
@@ -101,6 +102,7 @@ export default function QuickAddProductDialog({
       setNewSalesRate("")
       setNewPurchaseRate("")
       setNewMrp("")
+      setIsGstInclusive(false)
     }
   }, [initialName, isOpen])
 
@@ -289,6 +291,7 @@ export default function QuickAddProductDialog({
         mrp: Number(mrp) || 0,
         isActive,
         alternativeUnits,
+        isGstInclusive,
       }
 
       const response: any = await axiosClient.post("/Product", payload)
@@ -532,7 +535,7 @@ export default function QuickAddProductDialog({
               <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5 border-b border-zinc-900 pb-1">
                 <Percent className="h-3.5 w-3.5" /> Pricing & Tax Slab
               </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
                 <FormField
                   label="Purchase Rate (₹)"
                   type="number"
@@ -575,6 +578,18 @@ export default function QuickAddProductDialog({
                         {tp.name} ({tp.cgst + tp.sgst}%)
                       </option>
                     ))}
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-zinc-400">GST Type *</label>
+                  <select
+                    value={isGstInclusive ? "inclusive" : "exclusive"}
+                    onChange={(e) => setIsGstInclusive(e.target.value === "inclusive")}
+                    className="h-9 w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-700"
+                  >
+                    <option value="exclusive">GST Exclusive</option>
+                    <option value="inclusive">GST Inclusive</option>
                   </select>
                 </div>
               </div>

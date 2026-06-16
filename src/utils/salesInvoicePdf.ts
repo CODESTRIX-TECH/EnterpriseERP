@@ -20,17 +20,12 @@ export const generateThermalReceipt = (
   const headerHeight = 25 + (company?.address ? 8 : 0) + (company?.phone || company?.email ? 4 : 0) + (company?.gstNumber ? 4 : 0);
   const detailsHeight = 25; // Invoice No, Date, Customer, Warehouse
   const itemsHeight = (invoice.items || []).reduce((sum, item) => {
-    let h = 5; // product name
-    const subDetails = [
-      item.variantName,
-      item.batchNumber,
-      item.taxPercentage,
-      item.discountPercentage
-    ].filter(Boolean).length;
-    if (subDetails > 0) h += 4;
-    return sum + h + 2; // + spacing
+    let h = 6; // product name
+    const subDetailsPresent = !!(item.variantName || item.batchNumber || item.taxPercentage || item.discountPercentage || item.taxableAmount);
+    if (subDetailsPresent) h += 6.5; // average height for 2 sub-lines
+    return sum + h + 2.5; // + spacing
   }, 10); // + header
-  const totalsHeight = 15 + (invoice.discountAmount > 0 ? 4 : 0) + (invoice.taxAmount > 0 ? 4 : 0) + 12; // Net, Paid, Due
+  const totalsHeight = 15 + (invoice.discountAmount > 0 ? 4 : 0) + 4 + (invoice.taxAmount > 0 ? 4 : 0) + 12; // Net, Paid, Due, plus Taxable Value
   const paymentHistoryHeight = (invoice.paymentDetails || []).length * 4 + (invoice.paymentDetails?.length ? 6 : 0);
   const remarksHeight = invoice.remarks ? 10 : 0;
   const footerHeight = 20;
@@ -178,12 +173,13 @@ export const generateThermalReceipt = (
 
     y += nameLines.length * 3.2;
 
-    // Sub-details (Variant, Batch, GST, Discount)
+    // Sub-details (Variant, Batch, GST, Discount, Taxable)
     const subDetails = [
       item.variantName ? `Var: ${item.variantName}` : null,
       item.batchNumber ? `Batch: ${item.batchNumber}` : null,
-      item.taxPercentage ? `GST: ${item.taxPercentage}%` : null,
-      item.discountPercentage ? `Disc: ${item.discountPercentage}%` : null
+      item.taxPercentage ? `GST: ${item.taxPercentage}% (Rs. ${(item.taxAmount || 0).toFixed(2)})` : null,
+      item.discountPercentage ? `Disc: ${item.discountPercentage}%` : null,
+      item.taxableAmount ? `Taxable: Rs. ${(item.taxableAmount || 0).toFixed(2)}` : null
     ].filter(Boolean).join(' | ');
 
     if (subDetails) {
@@ -224,10 +220,13 @@ export const generateThermalReceipt = (
     y += 3.8;
   };
 
+  const totalTaxable = (invoice.items || []).reduce((sum, item) => sum + (item.taxableAmount || 0), 0);
+
   drawTotalRow('SubTotal:', `Rs. ${invoice.subTotal.toFixed(2)}`);
   if (invoice.discountAmount > 0) {
     drawTotalRow('Discount:', `-Rs. ${invoice.discountAmount.toFixed(2)}`);
   }
+  drawTotalRow('Taxable Value:', `Rs. ${totalTaxable.toFixed(2)}`);
   if (invoice.taxAmount > 0) {
     drawTotalRow('Tax (GST):', `+Rs. ${invoice.taxAmount.toFixed(2)}`);
   }
@@ -459,7 +458,7 @@ export const generateSalesInvoicePdf = (
   // ==========================================
   // ITEMS TABLE SECTION
   // ==========================================
-  const tableHeaders = [['Sr.', 'Code', 'Product Description', 'Qty', 'Rate', 'GST', 'Disc', 'Amount']];
+  const tableHeaders = [['Sr.', 'Code', 'Product Description', 'Qty', 'Rate', 'Taxable Val', 'GST %', 'GST Amt', 'Disc', 'Amount']];
   
   const tableRows = (invoice.items || []).map((item, index) => {
     const descText = [
@@ -474,7 +473,9 @@ export const generateSalesInvoicePdf = (
       descText,
       item.qty.toString(),
       `Rs. ${item.rate.toFixed(2)}`,
+      `Rs. ${(item.taxableAmount || 0).toFixed(2)}`,
       `${item.taxPercentage || 0}%`,
+      `Rs. ${(item.taxAmount || 0).toFixed(2)}`,
       `${item.discountPercentage || 0}%`,
       `Rs. ${(item.amount || 0).toFixed(2)}`
     ];
@@ -489,21 +490,23 @@ export const generateSalesInvoicePdf = (
       fillColor: [139, 92, 246] as any, // Violet
       textColor: [255, 255, 255] as any,
       fontStyle: 'bold',
-      fontSize: 9,
+      fontSize: 8,
       halign: 'left',
     },
     columnStyles: {
-      0: { cellWidth: 10, halign: 'center' },
-      1: { cellWidth: 20 },
-      2: { cellWidth: 70 },
-      3: { cellWidth: 15, halign: 'center' },
-      4: { cellWidth: 20, halign: 'right' },
-      5: { cellWidth: 15, halign: 'center' },
-      6: { cellWidth: 15, halign: 'center' },
-      7: { cellWidth: 25, halign: 'right' }
+      0: { cellWidth: 8, halign: 'center' },
+      1: { cellWidth: 15 },
+      2: { cellWidth: 42 },
+      3: { cellWidth: 10, halign: 'center' },
+      4: { cellWidth: 18, halign: 'right' },
+      5: { cellWidth: 20, halign: 'right' },
+      6: { cellWidth: 12, halign: 'center' },
+      7: { cellWidth: 18, halign: 'right' },
+      8: { cellWidth: 12, halign: 'center' },
+      9: { cellWidth: 25, halign: 'right' }
     },
     bodyStyles: {
-      fontSize: 8,
+      fontSize: 7.5,
       textColor: darkTextColor as any,
     },
     margin: { left: 15, right: 15 },
@@ -518,6 +521,7 @@ export const generateSalesInvoicePdf = (
   // TOTALS SECTION (Structured Grid Table)
   // ==========================================
   const balanceDueA4 = Math.max(0, invoice.netAmount - (invoice.paidAmount || 0));
+  const totalTaxableA4 = (invoice.items || []).reduce((sum, item) => sum + (item.taxableAmount || 0), 0);
 
   const totalsBody = [
     [
@@ -527,6 +531,10 @@ export const generateSalesInvoicePdf = (
     [
       { content: 'Discount:', styles: { halign: 'right' } },
       { content: invoice.discountAmount > 0 ? `-Rs. ${invoice.discountAmount.toFixed(2)}` : 'Rs. 0.00', styles: { halign: 'right', fontStyle: 'bold', textColor: invoice.discountAmount > 0 ? [239, 68, 68] : darkTextColor } }
+    ],
+    [
+      { content: 'Taxable Value:', styles: { halign: 'right' } },
+      { content: `Rs. ${totalTaxableA4.toFixed(2)}`, styles: { halign: 'right', fontStyle: 'bold' } }
     ],
     [
       { content: 'Tax (GST):', styles: { halign: 'right' } },

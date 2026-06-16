@@ -3,8 +3,8 @@ import { store } from "../store/store"
 import { setLicenseExpired } from "../store/slices/authSlice"
 
 // const API_BASE = "https://localhost:44387";
-// export const API_BASE = "http://localhost:5262"
- export const API_BASE = "https://reactapi.advancedmedicentre.com"
+export const API_BASE = "http://localhost:5262"
+//  export const API_BASE = "https://reactapi.advancedmedicentre.com"
 
 export const IMAGE_BASE = `${API_BASE}/uploads/`
 

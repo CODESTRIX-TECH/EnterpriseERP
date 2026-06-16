@@ -26,6 +26,7 @@ export interface ProductDto {
   isActive: boolean;
   isDeleted?: boolean;
   createdAt?: string;
+  isGstInclusive?: boolean;
 
   // UI Helper fields if returned (handled safely)
   categoryName?: string;

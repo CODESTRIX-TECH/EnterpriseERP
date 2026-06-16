@@ -20,4 +20,6 @@ export interface SalesInvoiceItemDto {
   unitName?: string;
   unitSymbol?: string;
   conversionFactor?: number;
+  isGstInclusive?: boolean;
+  taxableAmount?: number;
 }
